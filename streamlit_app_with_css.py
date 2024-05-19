@@ -4,9 +4,11 @@ import altair as alt
 import plotly.express as px
 from streamlit_folium import st_folium
 from map_road_type import map_road_type
-from dashboard.clustermap_severity import create_cluster_map
+from clustermap_severity import create_cluster_map
 from predict import create_Scatterplot_map
 from streamlit_option_menu import option_menu
+import openai
+from streamlit_chat import message
 
 # Page configuration
 st.set_page_config(
@@ -24,15 +26,34 @@ with open('style.css') as f:
 
 # Load data
 df_reshaped = pd.read_csv('data/us-population-2010-2019-reshaped.csv')
-df_lat_lon = pd.read_excel('data/testdata.xlsx')
+df_lat_lon = pd.read_excel('data/demo.xlsx')
 
 # Sidebar function to manage navigation and filters
 def sideBar():
     with st.sidebar:
         st.title('🏂 KSP Dashboard')
 
+        # File uploader in the sidebar
+        data = st.file_uploader("Upload a Dataset", type=["csv", "xlsx", "xls"])
+        if data is not None:
+            if data.name.endswith('.csv'):
+                df_lat_lon = pd.read_csv(data)
+            elif data.name.endswith(('.xlsx', '.xls')):
+                df_lat_lon = pd.read_excel(data)
+
+            df_reshaped = pd.read_csv('data/us-population-2010-2019-reshaped.csv')
+            # st.dataframe(df.head())
+            
+        else:
+            df_reshaped = pd.read_csv('data/us-population-2010-2019-reshaped.csv')
+            # st.dataframe(df.head())
+            df_lat_lon = pd.read_excel('data/demo.xlsx')
+
+        
+        
         # Year selection
         year_list = list(df_lat_lon.Year.unique())[::-1]
+        
         selected_year = st.selectbox('Select a year', year_list)
         df_selected_year = df_reshaped[df_reshaped.year == selected_year]
         df_selected_year_sorted = df_selected_year.sort_values(by="population", ascending=False)
@@ -68,6 +89,13 @@ def sideBar():
 def home_page(selected_year, df_accident_count_sorted, selected_color_theme,df_selected_year):
     st.markdown('## Karnataka State Police Dashboard')
 
+    with st.expander("🧭 My database"):
+        shwdata = st.multiselect('Filter:', df_lat_lon_selected_year.columns, default=[])
+        if shwdata:
+            st.dataframe(df_lat_lon_selected_year[shwdata], use_container_width=True)
+        else:
+            st.dataframe(df_lat_lon_selected_year, use_container_width=True)
+
     df_selected_year = df_reshaped[df_reshaped.year == selected_year]
     df_selected_year_sorted = df_selected_year.sort_values(by="population", ascending=False)
 
@@ -76,7 +104,7 @@ def home_page(selected_year, df_accident_count_sorted, selected_color_theme,df_s
     with col1:
         st.markdown('#### Total Accidents')
         total_population = df_lat_lon[df_lat_lon['Year'] == selected_year]['Latitude'].count()
-        st.metric(label="Total Population", value=total_population)
+        st.metric(label="Total Accidents", value=total_population)
 
     with col2:
         st.markdown('#### Highest Accidents City')
@@ -97,7 +125,7 @@ def home_page(selected_year, df_accident_count_sorted, selected_color_theme,df_s
         else:
             st.metric(label="Migration Difference", value="N/A")
 
-    col = st.columns(( 4.5, 3), gap='medium')
+    col = st.columns(( 4.5, 3.5), gap='medium')
 
 
     with col[0]:
@@ -105,13 +133,11 @@ def home_page(selected_year, df_accident_count_sorted, selected_color_theme,df_s
         map_folium = create_cluster_map(df_lat_lon_selected_year)
         st_folium(map_folium, width=700, height=500)
 
-        choropleth = make_choropleth(df_selected_year, 'states_code', 'population', selected_color_theme)
-        st.plotly_chart(choropleth, use_container_width=True)
-
         heatmap = make_heatmap(df_reshaped, 'year', 'states', 'population', selected_color_theme)
         st.altair_chart(heatmap, use_container_width=True)
 
     with col[1]:
+        
         st.markdown('#### Top Districts by Accident Count')
         st.dataframe(df_accident_count_sorted,
                      column_order=["district", "accident_count"],
@@ -127,6 +153,10 @@ def home_page(selected_year, df_accident_count_sorted, selected_color_theme,df_s
                          )
                      }
                      )
+        st.markdown('#### Choropleth Map')
+        choropleth = make_choropleth(df_selected_year, 'states_code', 'population', selected_color_theme)
+        st.plotly_chart(choropleth, use_container_width=True)
+
 
         with st.expander('About', expanded=True):
             st.write('''
@@ -134,6 +164,7 @@ def home_page(selected_year, df_accident_count_sorted, selected_color_theme,df_s
                 - :orange[**Gains/Losses**]: states with high inbound/ outbound migration for selected year
                 - :orange[**States Migration**]: percentage of states with annual inbound/ outbound migration > 50,000
             ''')
+        
 
 def progress_page(df_lat_lon_selected_year):
     st.markdown("## Prediction Page")
@@ -143,8 +174,49 @@ def progress_page(df_lat_lon_selected_year):
     
 
 def analytics_page():
-    st.markdown("## Analytics Page")
-    st.write("Content for the Analytics page goes here.")
+    # message("My message") 
+    # message("Hello bot!", is_user=True)  # align's the message to the right
+    st.title("ChatGPT-like clone")
+
+    # Retrieve the API key from secrets
+    api_key = st.secrets["openai"]["api_key"]
+
+    # Initialize the OpenAI client with the API key
+    openai.api_key = api_key
+
+    # Ensure the session state is properly initialized
+    if "openai_model" not in st.session_state:
+        st.session_state["openai_model"] = "gpt-3.5-turbo"
+
+    if "messages" not in st.session_state:
+        st.session_state.messages = []
+
+    # Display previous chat messages
+    for message in st.session_state.messages:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
+
+    # Handle new user input
+    if prompt := st.chat_input("What is up?"):
+        st.session_state.messages.append({"role": "user", "content": prompt})
+        with st.chat_message("user"):
+            st.markdown(prompt)
+
+        # Get the response from OpenAI
+        with st.chat_message("assistant"):
+            response = openai.ChatCompletion.create(
+                model=st.session_state["openai_model"],
+                messages=[
+                    {"role": m["role"], "content": m["content"]}
+                    for m in st.session_state.messages
+                ]
+            )
+
+            response_content = response.choices[0].message['content']
+            st.markdown(response_content)
+
+        st.session_state.messages.append({"role": "assistant", "content": response_content})
+    
 
 # Utility functions
 def make_heatmap(input_df, input_y, input_x, input_color, input_color_theme):
